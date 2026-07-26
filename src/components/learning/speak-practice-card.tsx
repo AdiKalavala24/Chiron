@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { Check, Mic, X } from 'lucide-react-native';
 import { useTheme } from '@/theme';
 import { CandyButton, IconBadge } from '@/components/ui';
-import { textSimilarity } from '@/lib/random';
+import { useFastPhraseRecognition } from '@/features/speech';
 import type { SpeakPracticePayload } from '@/features/curriculum';
 
 interface SpeakPracticeCardProps {
@@ -21,56 +20,55 @@ interface SpeakPracticeCardProps {
  * true phoneme-level pronunciation grader (that needs a specialized
  * speech-scoring model). Close-but-imperfect transcripts still score
  * well, which is the right bias for a young reader.
+ *
+ * Latency is handled in `useFastPhraseRecognition`: interim results
+ * stream a live transcript, and a correct reading is graded the instant
+ * it scores a pass rather than after the platform's end-of-speech
+ * timeout.
  */
 export function SpeakPracticeCard({ payload, onPhraseAttempt, onAllPhrasesComplete, onReadyForNextItem }: SpeakPracticeCardProps) {
   const theme = useTheme();
   const [index, setIndex] = useState(0);
-  const [listening, setListening] = useState(false);
-  const [micAvailable, setMicAvailable] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [checked, setChecked] = useState(false);
-  const [passed, setPassed] = useState(false);
+  const [result, setResult] = useState<{ passed: boolean; transcript: string } | null>(null);
+  /** The recognizer returned nothing at all — a missed recording, not a wrong answer. */
+  const [unheard, setUnheard] = useState(false);
 
   const phrase = payload.targetPhrases[index];
 
-  const gradeAttempt = (heardText: string) => {
-    const score = textSimilarity(heardText, phrase.text);
-    const didPass = score >= payload.passAccuracy;
-    setPassed(didPass);
-    setChecked(true);
-    onPhraseAttempt(didPass);
-  };
+  const handleAttempt = useCallback(
+    ({ transcript, score }: { transcript: string; score: number }) => {
+      // Silence isn't an assessment of anything. Grading it would count a
+      // mic that never picked up against the kid's accuracy and push the
+      // adaptive controller's consecutive-wrong count up for free.
+      if (!transcript.trim()) {
+        setUnheard(true);
+        return;
+      }
+      const passed = score >= payload.passAccuracy;
+      setUnheard(false);
+      setResult({ passed, transcript });
+      onPhraseAttempt(passed);
+    },
+    [payload.passAccuracy, onPhraseAttempt],
+  );
 
-  useSpeechRecognitionEvent('result', (event) => {
-    const text = event.results[0]?.transcript;
-    if (text && event.isFinal) {
-      setTranscript(text);
-      setListening(false);
-      gradeAttempt(text);
-    }
+  const { available, listening, partial, level, start } = useFastPhraseRecognition({
+    passAccuracy: payload.passAccuracy,
+    onAttempt: handleAttempt,
   });
-  useSpeechRecognitionEvent('end', () => setListening(false));
-  useSpeechRecognitionEvent('error', () => setListening(false));
 
-  useEffect(() => {
-    ExpoSpeechRecognitionModule.requestPermissionsAsync()
-      .then((result) => setMicAvailable(result.granted && ExpoSpeechRecognitionModule.isRecognitionAvailable()))
-      .catch(() => setMicAvailable(false));
-  }, []);
-
-  const startListening = () => {
-    if (!micAvailable || listening) return;
-    setChecked(false);
-    setTranscript('');
-    setListening(true);
-    ExpoSpeechRecognitionModule.start({ lang: 'en-US', interimResults: false, continuous: false });
+  const handleStart = () => {
+    if (!available || listening) return;
+    setResult(null);
+    setUnheard(false);
+    start(phrase.text);
   };
 
   const handleNext = () => {
     onReadyForNextItem?.();
     const nextIndex = index + 1;
-    setChecked(false);
-    setTranscript('');
+    setResult(null);
+    setUnheard(false);
     if (nextIndex >= payload.targetPhrases.length) {
       onAllPhrasesComplete();
       return;
@@ -114,25 +112,37 @@ export function SpeakPracticeCard({ payload, onPhraseAttempt, onAllPhrasesComple
       </View>
 
       <View style={{ alignItems: 'center', marginTop: theme.space[5] }}>
-        <Pressable
-          onPress={startListening}
-          disabled={!micAvailable || listening}
-          accessibilityRole="button"
-          accessibilityLabel="Start speaking"
+        <MicButton listening={listening} level={level} enabled={available} onPress={handleStart} />
+        <Text
+          style={{
+            marginTop: theme.space[2],
+            fontFamily: theme.fontFamily.bodyMedium,
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.mutedForeground,
+            textAlign: 'center',
+          }}
         >
-          <IconBadge
-            size={72}
-            backgroundColor={listening ? theme.colors.secondary : theme.colors.accent}
-            icon={<Mic size={28} color="#fff" strokeWidth={2.5} />}
-            style={{ opacity: micAvailable ? 1 : 0.4 }}
-          />
-        </Pressable>
-        <Text style={{ marginTop: theme.space[2], fontFamily: theme.fontFamily.bodyMedium, fontSize: theme.fontSize.sm, color: theme.colors.mutedForeground }}>
-          {listening ? 'Listening…' : micAvailable ? 'Tap to say it out loud' : 'Mic unavailable on this device'}
+          {listening ? 'Listening…' : available ? 'Tap to say it out loud' : 'Mic unavailable on this device'}
         </Text>
+        {/* Live transcript — the kid sees words appear as they speak, which is
+            what makes the interaction feel instant even before it's graded. */}
+        {listening ? (
+          <Text
+            style={{
+              marginTop: theme.space[2],
+              minHeight: theme.lineHeight.base,
+              fontFamily: theme.fontFamily.bodySemiBold,
+              fontSize: theme.fontSize.base,
+              color: theme.colors.accent,
+              textAlign: 'center',
+            }}
+          >
+            {partial}
+          </Text>
+        ) : null}
       </View>
 
-      {checked ? (
+      {result ? (
         <View
           style={{
             flexDirection: 'row',
@@ -143,34 +153,113 @@ export function SpeakPracticeCard({ payload, onPhraseAttempt, onAllPhrasesComple
             borderRadius: theme.radius.md,
             borderWidth: theme.borderWidth.chunky,
             borderColor: theme.colors.foreground,
-            backgroundColor: passed ? theme.colors.quaternary : theme.colors.tertiary,
+            backgroundColor: result.passed ? theme.colors.quaternary : theme.colors.tertiary,
           }}
         >
           <IconBadge
             size={32}
             backgroundColor={theme.colors.card}
-            icon={passed ? <Check size={16} color={theme.colors.foreground} strokeWidth={3} /> : <X size={16} color={theme.colors.foreground} strokeWidth={3} />}
+            icon={
+              result.passed ? (
+                <Check size={16} color={theme.colors.foreground} strokeWidth={3} />
+              ) : (
+                <X size={16} color={theme.colors.foreground} strokeWidth={3} />
+              )
+            }
           />
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: theme.fontFamily.bodyMedium, fontSize: theme.fontSize.base, color: theme.colors.foreground }}>
-              {passed ? 'Nice and clear!' : 'Good try — want to say it again?'}
+              {result.passed ? 'Nice and clear!' : 'Good try — want to say it again?'}
             </Text>
-            {transcript ? (
+            {result.transcript ? (
               <Text style={{ fontFamily: theme.fontFamily.body, fontSize: theme.fontSize.sm, color: theme.colors.foreground, marginTop: 2 }}>
-                Heard: &ldquo;{transcript}&rdquo;
+                Heard: &ldquo;{result.transcript}&rdquo;
               </Text>
             ) : null}
           </View>
         </View>
       ) : null}
 
+      {unheard ? (
+        <View
+          style={{
+            marginTop: theme.space[5],
+            padding: theme.space[4],
+            borderRadius: theme.radius.md,
+            borderWidth: theme.borderWidth.chunky,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.muted,
+          }}
+        >
+          <Text style={{ fontFamily: theme.fontFamily.bodyMedium, fontSize: theme.fontSize.base, color: theme.colors.foreground }}>
+            We didn&rsquo;t hear anything that time — tap the mic and try again.
+          </Text>
+        </View>
+      ) : null}
+
       <View style={{ marginTop: theme.space[4], alignItems: 'flex-start' }}>
-        {checked ? (
+        {result ? (
           <CandyButton label={index + 1 >= payload.targetPhrases.length ? 'Finish' : 'Next phrase'} onPress={handleNext} />
-        ) : !micAvailable ? (
-          <CandyButton label="Skip (mic unavailable)" onPress={() => { onPhraseAttempt(true); handleNext(); }} variant="secondary" showArrow={false} />
+        ) : !available ? (
+          <CandyButton
+            label="Skip (mic unavailable)"
+            onPress={() => {
+              onPhraseAttempt(true);
+              handleNext();
+            }}
+            variant="secondary"
+            showArrow={false}
+          />
         ) : null}
       </View>
     </View>
+  );
+}
+
+/**
+ * Mic button whose ring scales with live input level. Shared with Echo
+ * the Space Alien so both speech surfaces show the same "I can hear you"
+ * signal.
+ */
+export function MicButton({
+  listening,
+  level,
+  enabled,
+  onPress,
+  size = 72,
+}: {
+  listening: boolean;
+  level: number;
+  enabled: boolean;
+  onPress: () => void;
+  size?: number;
+}) {
+  const theme = useTheme();
+  const ringScale = 1 + (listening ? level * 0.45 : 0);
+
+  return (
+    <Pressable onPress={onPress} disabled={!enabled || listening} accessibilityRole="button" accessibilityLabel="Start speaking">
+      <View style={{ width: size * 1.5, height: size * 1.5, alignItems: 'center', justifyContent: 'center' }}>
+        {listening ? (
+          <View
+            style={{
+              position: 'absolute',
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              backgroundColor: theme.colors.secondary,
+              opacity: 0.35,
+              transform: [{ scale: ringScale }],
+            }}
+          />
+        ) : null}
+        <IconBadge
+          size={size}
+          backgroundColor={listening ? theme.colors.secondary : theme.colors.accent}
+          icon={<Mic size={size * 0.39} color="#fff" strokeWidth={2.5} />}
+          style={{ opacity: enabled ? 1 : 0.4 }}
+        />
+      </View>
+    </Pressable>
   );
 }

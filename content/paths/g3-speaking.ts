@@ -53,11 +53,13 @@ export const g3Speaking = subjectPath('3', 'speaking', [
           'Echo Tower rewards clear, steady speech — the clearer you are, the stronger the block.',
         ),
       ],
-      [
-        phrase('g3-speaking-presentation-practice-sp1', 'Rise, tower, rise!'),
-        phrase('g3-speaking-presentation-practice-sp2', 'Stone by stone, my voice is strong.'),
-        phrase('g3-speaking-presentation-practice-sp3', 'Clear and steady wins the tower.'),
-      ],
+      {
+        speakPhrases: [
+          phrase('g3-speaking-presentation-practice-sp1', 'Rise, tower, rise!'),
+          phrase('g3-speaking-presentation-practice-sp2', 'Stone by stone, my voice is strong.'),
+          phrase('g3-speaking-presentation-practice-sp3', 'Clear and steady wins the tower.'),
+        ],
+      },
     ),
   ]),
 ]);

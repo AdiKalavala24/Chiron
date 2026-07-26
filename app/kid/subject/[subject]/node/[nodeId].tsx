@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, PartyPopper, Star } from 'lucide-react-native';
+import { ArrowLeft, PartyPopper, Shuffle, Star } from 'lucide-react-native';
 import { useTheme } from '@/theme';
 import { CandyButton, ConfettiField, IconBadge, PillChip } from '@/components/ui';
 import { MethodPlayer } from '@/components/learning';
 import { AffectCameraPreview, useCameraAffectEngine, type AffectSignal } from '@/features/affect';
 import { useAffectAuditStore } from '@/stores/affect-audit-store';
 import { INITIAL_BEHAVIOR_SIGNAL, useAdaptiveController, type BehaviorSignal } from '@/features/adaptive';
-import { getNode } from '@/features/curriculum';
+import { buildTechniqueEnsemble, getNode, pickStartingTechnique, TECHNIQUE_LABEL } from '@/features/curriculum';
 import type { ContentBlock, Subject, TeachingMethod } from '@/features/curriculum';
 import { generateLessonBlocks } from '@/features/gemini';
 import { useProfileStore } from '@/stores/profile-store';
@@ -37,7 +37,17 @@ export default function NodePlayerScreen() {
   const clearPendingRegulation = useSessionStore((s) => s.clearPendingRegulation);
   const recordAudit = useAffectAuditStore((s) => s.record);
 
-  const [activeMethod, setActiveMethod] = useState<TeachingMethod>(node?.blocks[0]?.method ?? 'question');
+  /**
+   * The five ways this node can be taught. Authored blocks where the path
+   * has them, derived from the node's own content where it doesn't — so
+   * every node in every subject has a full technique set for both the kid
+   * and the adaptive controller to move between.
+   */
+  const ensemble = useMemo(() => (node ? buildTechniqueEnsemble(subject, node) : []), [node, subject]);
+
+  // Lazy initializer, so the starting technique is drawn once per entry
+  // into the lesson rather than re-rolled on every render.
+  const [activeMethod, setActiveMethod] = useState<TeachingMethod>(() => pickStartingTechnique(ensemble) ?? 'question');
   const [instanceKey, setInstanceKey] = useState(0);
   const [behavior, setBehavior] = useState<BehaviorSignal>(INITIAL_BEHAVIOR_SIGNAL);
   const [latestAffect, setLatestAffect] = useState<AffectSignal | undefined>(undefined);
@@ -60,7 +70,7 @@ export default function NodePlayerScreen() {
   const lastAnswerAtRef = useRef<number | null>(null);
   const pendingCompletionRef = useRef<'completed' | 'mastered' | null>(null);
 
-  const allBlocks = useMemo(() => (node ? [...node.blocks, ...generatedBlocks] : []), [node, generatedBlocks]);
+  const allBlocks = useMemo(() => [...ensemble.map((option) => option.block), ...generatedBlocks], [ensemble, generatedBlocks]);
   const activeBlock = allBlocks.find((b) => b.method === activeMethod) ?? allBlocks[0];
   // Memoized because it's a dependency of the adaptive controller's main
   // effect — a fresh array each render would re-run that effect on every
@@ -170,6 +180,36 @@ export default function NodePlayerScreen() {
     }
   };
 
+  /**
+   * Manual technique switch — advances to the next technique in the
+   * ensemble. Exists so the whole rotation can be exercised on demand
+   * (the camera-driven switch otherwise only fires under real
+   * frustration/distraction, which is awkward to reproduce), and it
+   * doubles as a kid-facing "I'd rather do this another way" escape
+   * hatch. Logged like any other applied switch so parent analytics can
+   * tell a chosen switch from an adaptive one.
+   */
+  const handleManualSwitch = () => {
+    if (availableMethods.length < 2) return;
+    const currentIndex = availableMethods.indexOf(activeMethod);
+    const nextMethod = availableMethods[(currentIndex + 1) % availableMethods.length];
+    if (nextMethod === activeMethod) return;
+
+    consumePendingMethodChange(); // a queued adaptive switch is moot once we're moving anyway
+    logEvent({
+      childId: child.id,
+      grade,
+      subject,
+      nodeId,
+      type: 'method_switch_applied',
+      detail: { fromMethod: activeMethod, toMethod: nextMethod, reason: 'chosen manually', nodeTitle: node.title },
+    });
+    setActiveMethod(nextMethod);
+    setInstanceKey((k) => k + 1);
+    setBehavior(INITIAL_BEHAVIOR_SIGNAL);
+    lastInteractionAtRef.current = Date.now();
+  };
+
   const handleItemAnswered = (correct: boolean) => {
     const now = Date.now();
     const delta = lastAnswerAtRef.current ? now - lastAnswerAtRef.current : Number.POSITIVE_INFINITY;
@@ -265,7 +305,12 @@ export default function NodePlayerScreen() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back">
           <IconBadge size={44} backgroundColor={theme.colors.card} icon={<ArrowLeft size={20} color={theme.colors.foreground} strokeWidth={2.5} />} />
         </Pressable>
-        <PillChip label={METHOD_LABEL[activeMethod]} />
+        <PillChip
+          label={TECHNIQUE_LABEL[activeMethod]}
+          icon={<Shuffle size={14} color={theme.colors.foreground} strokeWidth={2.5} />}
+          onPress={handleManualSwitch}
+          testID="switch-technique"
+        />
         {generatingMethod ? <ActivityIndicator size="small" color={theme.colors.mutedForeground} /> : null}
         {permissionGranted ? (
           <AffectCameraPreview
@@ -302,15 +347,3 @@ export default function NodePlayerScreen() {
     </View>
   );
 }
-
-const METHOD_LABEL: Record<TeachingMethod, string> = {
-  question: 'Questions',
-  video: 'Video',
-  game_3d: 'Game',
-  chat_tutor: 'Voice Tutor',
-  trace: 'Trace',
-  speak_practice: 'Speaking',
-  reverse_tutor: 'Teach the Pet',
-  story_mission: 'Story',
-  regulation: 'Reset',
-};

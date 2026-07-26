@@ -58,18 +58,43 @@ export function gameBlock(
   difficulty: number,
   roundGoal: string,
   items: QuestionItem[],
-  speakPhrases?: SpeakPhrase[],
+  /** Speech-driven games (Echo Tower, Echo the Space Alien) draw rounds from here; Magic Canvas draws from `traceGlyphs`. */
+  pools: { speakPhrases?: SpeakPhrase[]; traceGlyphs?: TraceGlyph[] } = {},
 ): ContentBlock {
-  return { id, source: 'hardcoded', method: 'game_3d', payload: { gameId, skillChip, difficulty, roundGoal, items, speakPhrases } };
+  return {
+    id,
+    source: 'hardcoded',
+    method: 'game_3d',
+    payload: { gameId, skillChip, difficulty, roundGoal, items, ...pools },
+  };
 }
 
 export function chatTutorBlock(id: string, payload: ChatTutorPayload): ContentBlock {
   return { id, source: 'hardcoded', method: 'chat_tutor', payload };
 }
 
-export function glyph(id: string, glyphChar: string, guideMode: TraceGlyph['guideMode'] = 'dotted'): TraceGlyph {
-  return { id, glyph: glyphChar, guideMode };
+export function glyph(
+  id: string,
+  glyphChar: string,
+  guideMode: TraceGlyph['guideMode'] = 'dotted',
+  expectedStrokes?: number,
+): TraceGlyph {
+  return { id, glyph: glyphChar, guideMode, expectedStrokes: expectedStrokes ?? STROKE_COUNTS[glyphChar] };
 }
+
+/**
+ * Conventional handwriting stroke counts for the glyphs this curriculum
+ * actually authors, so `glyph()` fills `expectedStrokes` in without every
+ * call site restating it. Anything missing here simply gets `undefined`,
+ * which the canvas treats as "don't score stroke count at all".
+ */
+const STROKE_COUNTS: Record<string, number> = {
+  A: 3, B: 2, C: 1, D: 2, E: 4, F: 3, G: 2, H: 3, I: 3, J: 2, K: 3, L: 2, M: 4,
+  N: 3, O: 1, P: 2, Q: 2, R: 3, S: 1, T: 2, U: 1, V: 2, W: 4, X: 2, Y: 3, Z: 3,
+  a: 2, b: 2, c: 1, d: 2, e: 2, f: 2, g: 2, h: 2, i: 2, j: 3, k: 3, l: 1, m: 3,
+  n: 2, o: 1, p: 2, q: 2, r: 2, s: 1, t: 2, u: 2, v: 2, w: 4, x: 2, y: 2, z: 3,
+  '0': 1, '1': 2, '2': 1, '3': 1, '4': 2, '5': 2, '6': 1, '7': 2, '8': 1, '9': 2,
+};
 
 export function traceBlock(id: string, instructions: string, glyphs: TraceGlyph[], passAccuracy = 0.7): ContentBlock {
   return { id, source: 'hardcoded', method: 'trace', payload: { instructions, glyphs, passAccuracy } };

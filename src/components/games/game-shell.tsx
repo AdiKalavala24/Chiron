@@ -5,23 +5,10 @@ import { Canvas, useFrame } from '@react-three/fiber/native';
 import type { Group, Mesh } from 'three';
 import { useTheme } from '@/theme';
 import { PillChip } from '@/components/ui';
+import { reactionColor, type GameReactionState, type SceneProps } from './scenes';
 
+/** The original generic scenes — one procedural shape that grows as rounds are won. */
 export type GameSceneVariant = 'sprout' | 'gem' | 'trail' | 'tower';
-export type GameReactionState = 'idle' | 'correct' | 'incorrect';
-
-interface SceneProps {
-  variant: GameSceneVariant;
-  colorHex: string;
-  reactionState: GameReactionState;
-  /** 0-1 overall round progress — drives growth (sprout height, tower block count, etc). */
-  progressRatio: number;
-}
-
-function reactionColor(state: GameReactionState, base: string): string {
-  if (state === 'correct') return '#34D399';
-  if (state === 'incorrect') return '#F43F5E';
-  return base;
-}
 
 function SproutScene({ colorHex, reactionState, progressRatio }: SceneProps) {
   const groupRef = useRef<Group>(null);
@@ -109,21 +96,38 @@ interface GameShellProps {
   skillChip: string;
   roundGoal: string;
   colorHex: string;
-  variant: GameSceneVariant;
   reactionState: GameReactionState;
   progressRatio: number;
+  /** One of the generic growing shapes. Ignored when `scene` is supplied. */
+  variant?: GameSceneVariant;
+  /**
+   * A purpose-built scene, rendered inside the shared Canvas and lighting
+   * rig. The four flagship games (Phonics Monster Feast, Magic Canvas
+   * Tracing, Block Tower Builder, Echo the Space Alien) each pass their
+   * own here; the older content-driven games use `variant` instead.
+   */
+  scene?: React.ReactNode;
+  canvasHeight?: number;
   children?: React.ReactNode;
 }
 
 /**
- * Shared Expo GL / React Three Fiber shell every game plugs into. The
- * scene is deliberately simple (one procedural shape that grows and
- * flashes success/struggle colors) rather than a full art-directed
- * world — that's real follow-on content investment, not something to
- * fake. What's real here is the loop: an actual 3D canvas, actually
- * reacting to actually-graded answers.
+ * Shared Expo GL / React Three Fiber shell every game plugs into —
+ * skill chip, round goal, a 3D viewport, and the game's own controls
+ * underneath. What's real here is the loop: an actual 3D canvas,
+ * actually reacting to actually-graded answers.
  */
-export function GameShell({ skillChip, roundGoal, colorHex, variant, reactionState, progressRatio, children }: GameShellProps) {
+export function GameShell({
+  skillChip,
+  roundGoal,
+  colorHex,
+  reactionState,
+  progressRatio,
+  variant = 'gem',
+  scene,
+  canvasHeight = 220,
+  children,
+}: GameShellProps) {
   const theme = useTheme();
   const Scene = SCENES[variant];
 
@@ -137,7 +141,7 @@ export function GameShell({ skillChip, roundGoal, colorHex, variant, reactionSta
       </Text>
       <View
         style={{
-          height: 220,
+          height: canvasHeight,
           borderRadius: theme.radius.lg,
           overflow: 'hidden',
           borderWidth: theme.borderWidth.chunky,
@@ -148,7 +152,7 @@ export function GameShell({ skillChip, roundGoal, colorHex, variant, reactionSta
         <Canvas camera={{ position: [0, 0, 4], fov: 50 }}>
           <ambientLight intensity={0.7} />
           <directionalLight position={[2, 3, 2]} intensity={1.2} />
-          <Scene variant={variant} colorHex={colorHex} reactionState={reactionState} progressRatio={progressRatio} />
+          {scene ?? <Scene colorHex={colorHex} reactionState={reactionState} progressRatio={progressRatio} />}
         </Canvas>
       </View>
       <View style={{ marginTop: theme.space[4] }}>{children}</View>

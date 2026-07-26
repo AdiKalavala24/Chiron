@@ -75,7 +75,23 @@ export const SpeakPhraseSchema = z.object({
   phoneticHint: z.string().optional(),
 });
 
-export const GameIdSchema = z.enum(['number_garden', 'word_quest', 'ink_trail', 'echo_tower']);
+export const GameIdSchema = z.enum([
+  'number_garden',
+  'word_quest',
+  'ink_trail',
+  'echo_tower',
+  'phonics_monster',
+  'magic_canvas',
+  'block_tower',
+  'echo_alien',
+]);
+
+export const TraceGlyphSchema = z.object({
+  id: z.string().min(1),
+  glyph: z.string().min(1),
+  guideMode: z.enum(['outline', 'dotted', 'ghost']),
+  expectedStrokes: z.number().int().min(1).max(6).optional(),
+});
 
 export const GamePayloadSchema = z.object({
   gameId: GameIdSchema,
@@ -84,6 +100,7 @@ export const GamePayloadSchema = z.object({
   roundGoal: z.string().min(1),
   items: z.array(QuestionItemSchema).min(1),
   speakPhrases: z.array(SpeakPhraseSchema).optional(),
+  traceGlyphs: z.array(TraceGlyphSchema).optional(),
 });
 
 export const ChatTutorPayloadSchema = z.object({
@@ -92,12 +109,6 @@ export const ChatTutorPayloadSchema = z.object({
   objective: z.string().min(1),
   maxTurns: z.number().int().min(2).max(8),
   sampleProbes: z.array(z.string().min(1)).min(1),
-});
-
-export const TraceGlyphSchema = z.object({
-  id: z.string().min(1),
-  glyph: z.string().min(1),
-  guideMode: z.enum(['outline', 'dotted', 'ghost']),
 });
 
 export const TracePayloadSchema = z.object({

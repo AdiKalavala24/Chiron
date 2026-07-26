@@ -66,7 +66,23 @@ export interface VideoPayload {
   checkQuestions: QuestionItem[];
 }
 
-export type GameId = 'number_garden' | 'word_quest' | 'ink_trail' | 'echo_tower';
+/**
+ * The four `*_garden`/`*_quest`/`ink_trail`/`echo_tower` ids are the
+ * original generic shells (a quiz or speech drill wrapped in a growing 3D
+ * shape). The four below them are the purpose-built games — each has its
+ * own interaction loop and its own adaptive easing, and each is the
+ * canonical `game_3d` technique for one subject. Older hardcoded content
+ * still references the generic ids, so both sets stay valid.
+ */
+export type GameId =
+  | 'number_garden'
+  | 'word_quest'
+  | 'ink_trail'
+  | 'echo_tower'
+  | 'phonics_monster'
+  | 'magic_canvas'
+  | 'block_tower'
+  | 'echo_alien';
 
 export interface GamePayload {
   gameId: GameId;
@@ -76,8 +92,10 @@ export interface GamePayload {
   roundGoal: string;
   /** Question pool the game loop draws from to generate rounds. */
   items: QuestionItem[];
-  /** Echo Tower (and any other speech-driven game) draws rounds from here instead of `items`. */
+  /** Echo Tower / Echo the Space Alien (and any other speech-driven game) draws rounds from here instead of `items`. */
   speakPhrases?: SpeakPhrase[];
+  /** Magic Canvas Tracing draws its rounds from here instead of `items`. */
+  traceGlyphs?: TraceGlyph[];
 }
 
 export interface ChatTutorPayload {
@@ -96,6 +114,15 @@ export interface TraceGlyph {
   /** What's being traced, e.g. "A", "3", a shape name. */
   glyph: string;
   guideMode: TraceGuideMode;
+  /**
+   * How many pen strokes this glyph is normally written with ("A" is 3,
+   * "C" is 1). Optional, and never a hard requirement — the canvas lets
+   * the kid lift and redraw as many times as they like. It only nudges
+   * the score, so a single scribble across a 3-stroke letter reads as
+   * less deliberate than three placed strokes. Omit it and stroke count
+   * is ignored entirely.
+   */
+  expectedStrokes?: number;
 }
 
 export interface TracePayload {
