@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,7 +16,8 @@ export default function ChildDetailScreen() {
   const child = useProfileStore((s) => s.children.find((c) => c.id === id));
   const activeChildId = useProfileStore((s) => s.activeChildId);
   const setActiveChild = useProfileStore((s) => s.setActiveChild);
-  const events = useSessionStore((s) => s.eventsForChild(id ?? ''));
+  const allEvents = useSessionStore((s) => s.events);
+  const events = useMemo(() => allEvents.filter((e) => e.childId === (id ?? '')), [allEvents, id]);
   const stats = summarizeStats(events);
 
   if (!child) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -18,7 +18,8 @@ export default function GuidanceScreen() {
   const activeChildId = useProfileStore((s) => s.activeChildId);
   const childId = params.id ?? activeChildId ?? children[0]?.id;
   const child = children.find((c) => c.id === childId);
-  const events = useSessionStore((s) => s.eventsForChild(childId ?? ''));
+  const allEvents = useSessionStore((s) => s.events);
+  const events = useMemo(() => allEvents.filter((e) => e.childId === (childId ?? '')), [allEvents, childId]);
   const fetchDebrief = useDebriefStore((s) => s.fetchDebrief);
 
   const [debrief, setDebrief] = useState<NarrativeDebrief | null>(null);

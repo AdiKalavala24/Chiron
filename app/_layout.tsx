@@ -10,6 +10,11 @@ import { useAppFonts } from '@/hooks/use-app-fonts';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
+const rootStackScreenOptions = {
+  headerShown: false,
+  contentStyle: { backgroundColor: colors.background },
+} as const;
+
 export default function RootLayout() {
   const { fontsLoaded, fontsError } = useAppFonts();
 
@@ -33,7 +38,7 @@ export default function RootLayout() {
         <ThemeProvider>
           <View style={{ flex: 1, backgroundColor: colors.background }}>
             <StatusBar style="dark" />
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+            <Stack screenOptions={rootStackScreenOptions}>
               <Stack.Screen name="index" />
               <Stack.Screen name="kid" />
               <Stack.Screen name="parent" />
