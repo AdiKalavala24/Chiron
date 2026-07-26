@@ -1,0 +1,28 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.distractionvision'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.distractionvision"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+    // MediaPipe Tasks Vision requires 24; the root project's default is
+    // expected to already be at or above this on a recent Expo SDK, but
+    // stated here explicitly since this module can't build below it.
+    minSdkVersion 24
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Google's official on-device Face Landmarker — kept in version lockstep
+  // with the iOS CocoaPod (see ios/DistractionVision.podspec).
+  implementation 'com.google.mediapipe:tasks-vision:0.10.35'
+}

@@ -11,6 +11,9 @@
       ],
       "@content/*": [
         "./content/*"
+      ],
+      "@modules/*": [
+        "./modules/*"
       ]
     }
   },

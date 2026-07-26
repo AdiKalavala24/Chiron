@@ -1,45 +1,15 @@
 import React, { useEffect, useRef } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { classifyFace } from '@modules/distraction-vision/src';
+import { classifyFaceFeatures } from './face-classifier';
 import type { AffectLabel, AffectSignal } from './types';
 
 const SIGNAL_INTERVAL_MS = 5000;
+/** Low — this is a snapshot for ML classification, not something a human ever looks at. */
+const SNAPSHOT_QUALITY = 0.3;
 
-/**
- * PLACEHOLDER CLASSIFIER — read before wiring this into anything real.
- *
- * Real frustration/distaste facial-expression classification needs a
- * trained on-device model (facial action units) or a third-party SDK
- * (e.g. Affectiva) — that's a data/ML investment this pass can't ship.
- * This function exists so the *deferred-switch* mechanism (queue a
- * method change on signal, apply it only after the current item ends)
- * has a real signal stream to react to end-to-end during development.
- *
- * Everything downstream of this file only depends on the `AffectSignal`
- * shape, so swapping this for a real classifier later is a one-file
- * change — nothing in the adaptive controller or UI needs to move.
- */
-function placeholderClassify(): AffectSignal {
-  const roll = Math.random();
-  let label: AffectLabel = 'neutral';
-  let confidence = 0.5;
-  if (roll < 0.08) {
-    label = 'frustrated';
-    confidence = 0.7 + Math.random() * 0.25;
-  } else if (roll < 0.13) {
-    label = 'distaste';
-    confidence = 0.65 + Math.random() * 0.25;
-  } else if (roll < 0.22) {
-    label = 'distracted';
-    confidence = 0.6 + Math.random() * 0.25;
-  } else if (roll < 0.5) {
-    label = 'engaged';
-    confidence = 0.6 + Math.random() * 0.3;
-  }
-  return { at: Date.now(), label, confidence };
-}
-
-/** Lets a dev panel or test harness fire a specific signal on demand instead of waiting on the random timer. */
+/** Lets a dev panel or test harness fire a specific signal on demand instead of waiting on the real camera loop. */
 export function simulateAffectSignal(label: AffectLabel, confidence = 0.85): AffectSignal {
   return { at: Date.now(), label, confidence };
 }
@@ -52,7 +22,10 @@ interface UseCameraAffectEngineOptions {
 
 export function useCameraAffectEngine({ active, onSignal }: UseCameraAffectEngineOptions) {
   const [permission, requestPermission] = useCameraPermissions();
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cameraRef = useRef<CameraView | null>(null);
+  const cameraReadyRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(true);
   const onSignalRef = useRef(onSignal);
 
   useEffect(() => {
@@ -63,35 +36,81 @@ export function useCameraAffectEngine({ active, onSignal }: UseCameraAffectEngin
 
   useEffect(() => {
     if (!active || !granted) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      cancelledRef.current = true;
+      cameraReadyRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
       return;
     }
 
-    intervalRef.current = setInterval(() => {
-      onSignalRef.current(placeholderClassify());
-    }, SIGNAL_INTERVAL_MS);
+    cancelledRef.current = false;
+
+    // Recursive setTimeout rather than setInterval: a tick does an async
+    // camera capture + native classification, and we never want two ticks
+    // overlapping if one runs long — the next tick is only scheduled once
+    // the current one has fully finished (success or failure).
+    const tick = async () => {
+      try {
+        if (!cameraReadyRef.current || !cameraRef.current) return;
+        const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: SNAPSHOT_QUALITY });
+        if (cancelledRef.current || !photo?.base64) return;
+
+        const features = await classifyFace(photo.base64);
+        if (cancelledRef.current || !features) return;
+
+        const { label, confidence } = classifyFaceFeatures(features);
+        onSignalRef.current({ at: Date.now(), label, confidence });
+      } catch (error) {
+        // Capture or classification failed this tick (camera not settled,
+        // transient decode error, etc.) — skip it and try again next tick
+        // rather than surfacing a false reading.
+        console.warn('[affect] camera snapshot classification failed', error);
+      } finally {
+        if (!cancelledRef.current) {
+          timeoutRef.current = setTimeout(tick, SIGNAL_INTERVAL_MS);
+        }
+      }
+    };
+
+    timeoutRef.current = setTimeout(tick, SIGNAL_INTERVAL_MS);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = null;
+      cancelledRef.current = true;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     };
   }, [active, granted]);
 
   return {
+    /** Pass to `AffectCameraPreview`'s `ref` prop so the engine can snapshot the same feed the kid sees the indicator for. */
+    cameraRef,
+    /** Pass to `AffectCameraPreview`'s `onCameraReady` prop — snapshots before this fires can throw. */
+    onCameraReady: () => {
+      cameraReadyRef.current = true;
+    },
     permissionGranted: granted,
     permissionCanAskAgain: permission?.canAskAgain ?? true,
     requestPermission,
   };
 }
 
+interface AffectCameraPreviewProps {
+  style?: StyleProp<ViewStyle>;
+  onCameraReady?: () => void;
+}
+
 /**
  * Tiny, unobtrusive front-camera preview. Mount this while the engine is
  * active so the permission indicator stays honest about the camera being
  * in use — the kid should always be able to see when sensing is live.
+ * Forwards its ref to the underlying `CameraView` so `useCameraAffectEngine`
+ * can call `takePictureAsync` on the exact feed being previewed.
  */
-export function AffectCameraPreview({ style }: { style?: StyleProp<ViewStyle> }) {
-  return <CameraView style={style} facing="front" animateShutter={false} />;
-}
+export const AffectCameraPreview = React.forwardRef<CameraView, AffectCameraPreviewProps>(function AffectCameraPreview(
+  { style, onCameraReady },
+  ref,
+) {
+  return <CameraView ref={ref} style={style} facing="front" animateShutter={false} onCameraReady={onCameraReady} />;
+});

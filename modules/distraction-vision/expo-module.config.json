@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["DistractionVisionModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.distractionvision.DistractionVisionModule"]
+  }
+}

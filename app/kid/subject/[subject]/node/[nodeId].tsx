@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, PartyPopper, Star } from 'lucide-react-native';
 import { useTheme } from '@/theme';
@@ -8,7 +8,8 @@ import { MethodPlayer } from '@/components/learning';
 import { AffectCameraPreview, useCameraAffectEngine, type AffectSignal } from '@/features/affect';
 import { INITIAL_BEHAVIOR_SIGNAL, useAdaptiveController, type BehaviorSignal } from '@/features/adaptive';
 import { getNode } from '@/features/curriculum';
-import type { Subject, TeachingMethod } from '@/features/curriculum';
+import type { ContentBlock, Subject, TeachingMethod } from '@/features/curriculum';
+import { generateLessonBlocks } from '@/features/gemini';
 import { useProfileStore } from '@/stores/profile-store';
 import { useProgressStore } from '@/stores/progress-store';
 import { useSessionStore } from '@/stores/session-store';
@@ -39,14 +40,27 @@ export default function NodePlayerScreen() {
   const [behavior, setBehavior] = useState<BehaviorSignal>(INITIAL_BEHAVIOR_SIGNAL);
   const [latestAffect, setLatestAffect] = useState<AffectSignal | undefined>(undefined);
   const [celebrating, setCelebrating] = useState<'completed' | 'mastered' | null>(null);
+  /**
+   * Blocks generated on the fly (via Gemini) when the adaptive controller
+   * wants to switch to a method this node wasn't authored with — most
+   * hardcoded nodes only have one or two methods, so without this a
+   * distracted/frustrated kid on a single-method node would have nowhere
+   * to switch to. Session-only, never persisted, same spirit as the
+   * "More like this" shuffled-fallback blocks lesson-generator.ts already
+   * produces.
+   */
+  const [generatedBlocks, setGeneratedBlocks] = useState<ContentBlock[]>([]);
+  const [generatingMethod, setGeneratingMethod] = useState<TeachingMethod | null>(null);
 
   // Seeded with 0, not Date.now() — reading the clock belongs in an effect,
   // not in an initializer evaluated during render.
   const lastInteractionAtRef = useRef(0);
   const lastAnswerAtRef = useRef<number | null>(null);
   const pendingCompletionRef = useRef<'completed' | 'mastered' | null>(null);
+  const notifyFallbackRequestSettledRef = useRef<((method: TeachingMethod) => void) | null>(null);
 
-  const activeBlock = node?.blocks.find((b) => b.method === activeMethod) ?? node?.blocks[0];
+  const allBlocks = node ? [...node.blocks, ...generatedBlocks] : [];
+  const activeBlock = allBlocks.find((b) => b.method === activeMethod) ?? allBlocks[0];
 
   useEffect(() => {
     lastInteractionAtRef.current = Date.now();
@@ -56,7 +70,7 @@ export default function NodePlayerScreen() {
     return () => clearInterval(id);
   }, []);
 
-  const { permissionGranted, requestPermission } = useCameraAffectEngine({
+  const { cameraRef, onCameraReady, permissionGranted, requestPermission } = useCameraAffectEngine({
     active: !!child && !celebrating,
     onSignal: (signal) => {
       setLatestAffect(signal);
@@ -71,15 +85,37 @@ export default function NodePlayerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useAdaptiveController({
+  const handleNeedFallbackContent = (method: TeachingMethod) => {
+    if (!node) return;
+    setGeneratingMethod(method);
+    generateLessonBlocks({ grade, subject, node, preferredMethod: method })
+      .then((result) => {
+        setGeneratedBlocks((blocks) => [...blocks, ...result.blocks]);
+      })
+      .catch((error) => {
+        console.warn('[adaptive] fallback content generation failed', error);
+      })
+      .finally(() => {
+        setGeneratingMethod((current) => (current === method ? null : current));
+        notifyFallbackRequestSettledRef.current?.(method);
+      });
+  };
+
+  const { notifyFallbackRequestSettled } = useAdaptiveController({
     currentMethod: activeMethod,
     behavior,
     latestAffect,
+    availableMethods: allBlocks.map((b) => b.method),
+    onNeedFallbackContent: handleNeedFallbackContent,
     childId: child?.id ?? 'unknown',
     grade,
     subject,
     nodeId,
   });
+
+  useEffect(() => {
+    notifyFallbackRequestSettledRef.current = notifyFallbackRequestSettled;
+  }, [notifyFallbackRequestSettled]);
 
   if (!child || !node) {
     return (
@@ -97,7 +133,7 @@ export default function NodePlayerScreen() {
   const applyPendingSwitchIfAny = () => {
     const pending = consumePendingMethodChange();
     if (!pending) return;
-    const nodeHasTargetMethod = node.blocks.some((b) => b.method === pending.toMethod);
+    const nodeHasTargetMethod = allBlocks.some((b) => b.method === pending.toMethod);
     if (!nodeHasTargetMethod || pending.toMethod === activeMethod) return;
 
     logEvent({
@@ -218,7 +254,16 @@ export default function NodePlayerScreen() {
           <IconBadge size={44} backgroundColor={theme.colors.card} icon={<ArrowLeft size={20} color={theme.colors.foreground} strokeWidth={2.5} />} />
         </Pressable>
         <PillChip label={METHOD_LABEL[activeMethod]} />
-        {permissionGranted ? <AffectCameraPreview style={{ width: 32, height: 32, borderRadius: 16, overflow: 'hidden' }} /> : <View style={{ width: 32, height: 32 }} />}
+        {generatingMethod ? <ActivityIndicator size="small" color={theme.colors.mutedForeground} /> : null}
+        {permissionGranted ? (
+          <AffectCameraPreview
+            ref={cameraRef}
+            onCameraReady={onCameraReady}
+            style={{ width: 32, height: 32, borderRadius: 16, overflow: 'hidden' }}
+          />
+        ) : (
+          <View style={{ width: 32, height: 32 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={{ padding: theme.space[5], paddingBottom: theme.space[12] }}>
