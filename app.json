@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Chiron",
+    "slug": "Chiron",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "chiron",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.chiron.app",
+      "supportsTablet": true,
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better.",
+        "NSMicrophoneUsageDescription": "Chiron uses the microphone so you can talk with your voice tutor and practice speaking out loud.",
+        "NSSpeechRecognitionUsageDescription": "Chiron listens to what you say so your voice tutor can understand your answers and pronunciation."
+      }
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFDF5",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 160
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Chiron uses the microphone so you can talk with your voice tutor and practice speaking out loud."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Chiron uses the microphone so you can talk with your voice tutor and practice speaking out loud.",
+          "speechRecognitionPermission": "Chiron listens to what you say so your voice tutor can understand your answers and pronunciation."
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
