@@ -15,6 +15,7 @@
         "NSCameraUsageDescription": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better.",
         "NSMicrophoneUsageDescription": "Chiron uses the microphone so you can talk with your voice tutor and practice speaking out loud.",
         "NSSpeechRecognitionUsageDescription": "Chiron listens to what you say so your voice tutor can understand your answers and pronunciation.",
+        "NSPhotoLibraryUsageDescription": "Chiron does not access your photo library. This permission is required by bundled image components used for in-app assets.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
