@@ -8,7 +8,7 @@
     "scheme": "chiron",
     "userInterfaceStyle": "light",
     "ios": {
-      "bundleIdentifier": "com.chiron.app",
+      "bundleIdentifier": "com.tutring.chiron",
       "supportsTablet": true,
       "icon": "./assets/expo.icon",
       "infoPlist": {
@@ -34,8 +34,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better.",
-          "microphonePermission": false
+          "cameraPermission": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better."
         }
       ],
       [
