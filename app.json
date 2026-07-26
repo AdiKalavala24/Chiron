@@ -8,13 +8,14 @@
     "scheme": "chiron",
     "userInterfaceStyle": "light",
     "ios": {
-      "bundleIdentifier": "com.tutring.chiron",
+      "bundleIdentifier": "com.tutoring.chiron",
       "supportsTablet": true,
       "icon": "./assets/expo.icon",
       "infoPlist": {
         "NSCameraUsageDescription": "Chiron uses the camera during lessons to notice when you're frustrated or distracted, so it can switch to a different way of teaching that fits you better.",
         "NSMicrophoneUsageDescription": "Chiron uses the microphone so you can talk with your voice tutor and practice speaking out loud.",
-        "NSSpeechRecognitionUsageDescription": "Chiron listens to what you say so your voice tutor can understand your answers and pronunciation."
+        "NSSpeechRecognitionUsageDescription": "Chiron listens to what you say so your voice tutor can understand your answers and pronunciation.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "web": {
@@ -55,6 +56,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "02719701-5739-43c1-b113-20303b1e7a91"
+      }
     }
   }
 }
