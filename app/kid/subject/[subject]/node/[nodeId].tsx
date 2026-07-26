@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, PartyPopper, Star } from 'lucide-react-native';
@@ -6,6 +6,7 @@ import { useTheme } from '@/theme';
 import { CandyButton, ConfettiField, IconBadge, PillChip } from '@/components/ui';
 import { MethodPlayer } from '@/components/learning';
 import { AffectCameraPreview, useCameraAffectEngine, type AffectSignal } from '@/features/affect';
+import { useAffectAuditStore } from '@/stores/affect-audit-store';
 import { INITIAL_BEHAVIOR_SIGNAL, useAdaptiveController, type BehaviorSignal } from '@/features/adaptive';
 import { getNode } from '@/features/curriculum';
 import type { ContentBlock, Subject, TeachingMethod } from '@/features/curriculum';
@@ -34,6 +35,7 @@ export default function NodePlayerScreen() {
   const consumePendingMethodChange = useSessionStore((s) => s.consumePendingMethodChange);
   const pendingRegulation = useSessionStore((s) => s.pendingRegulation);
   const clearPendingRegulation = useSessionStore((s) => s.clearPendingRegulation);
+  const recordAudit = useAffectAuditStore((s) => s.record);
 
   const [activeMethod, setActiveMethod] = useState<TeachingMethod>(node?.blocks[0]?.method ?? 'question');
   const [instanceKey, setInstanceKey] = useState(0);
@@ -57,10 +59,13 @@ export default function NodePlayerScreen() {
   const lastInteractionAtRef = useRef(0);
   const lastAnswerAtRef = useRef<number | null>(null);
   const pendingCompletionRef = useRef<'completed' | 'mastered' | null>(null);
-  const notifyFallbackRequestSettledRef = useRef<((method: TeachingMethod) => void) | null>(null);
 
-  const allBlocks = node ? [...node.blocks, ...generatedBlocks] : [];
+  const allBlocks = useMemo(() => (node ? [...node.blocks, ...generatedBlocks] : []), [node, generatedBlocks]);
   const activeBlock = allBlocks.find((b) => b.method === activeMethod) ?? allBlocks[0];
+  // Memoized because it's a dependency of the adaptive controller's main
+  // effect — a fresh array each render would re-run that effect on every
+  // single render rather than only when the available methods change.
+  const availableMethods = useMemo(() => allBlocks.map((b) => b.method), [allBlocks]);
 
   useEffect(() => {
     lastInteractionAtRef.current = Date.now();
@@ -77,6 +82,20 @@ export default function NodePlayerScreen() {
       if (signal.label !== 'neutral' && signal.confidence >= 0.6 && child && node) {
         logEvent({ childId: child.id, grade, subject, nodeId, type: 'affect_signal', detail: { label: signal.label, confidence: signal.confidence } });
       }
+    },
+    onReading: (reading) => {
+      if (!child) return;
+      recordAudit({
+        kind: 'reading',
+        childId: child.id,
+        subject,
+        nodeId,
+        outcome: reading.outcome,
+        label: reading.label,
+        confidence: reading.confidence,
+        diagnostics: reading.diagnostics,
+        detail: reading.detail,
+      });
     },
   });
 
@@ -97,25 +116,20 @@ export default function NodePlayerScreen() {
       })
       .finally(() => {
         setGeneratingMethod((current) => (current === method ? null : current));
-        notifyFallbackRequestSettledRef.current?.(method);
       });
   };
 
-  const { notifyFallbackRequestSettled } = useAdaptiveController({
+  useAdaptiveController({
     currentMethod: activeMethod,
     behavior,
     latestAffect,
-    availableMethods: allBlocks.map((b) => b.method),
+    availableMethods,
     onNeedFallbackContent: handleNeedFallbackContent,
     childId: child?.id ?? 'unknown',
     grade,
     subject,
     nodeId,
   });
-
-  useEffect(() => {
-    notifyFallbackRequestSettledRef.current = notifyFallbackRequestSettled;
-  }, [notifyFallbackRequestSettled]);
 
   if (!child || !node) {
     return (
@@ -147,7 +161,6 @@ export default function NodePlayerScreen() {
     setActiveMethod(pending.toMethod);
     setInstanceKey((k) => k + 1);
     setBehavior(INITIAL_BEHAVIOR_SIGNAL);
-    // eslint-disable-next-line react-hooks/purity -- this runs from a child callback in response to a user action, never during render.
     lastInteractionAtRef.current = Date.now();
 
     if (pendingRegulation) {
@@ -158,7 +171,6 @@ export default function NodePlayerScreen() {
   };
 
   const handleItemAnswered = (correct: boolean) => {
-    // eslint-disable-next-line react-hooks/purity -- this runs from a child callback in response to a graded answer, never during render.
     const now = Date.now();
     const delta = lastAnswerAtRef.current ? now - lastAnswerAtRef.current : Number.POSITIVE_INFINITY;
     lastAnswerAtRef.current = now;

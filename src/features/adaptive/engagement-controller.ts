@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { GradeBand, Subject, TeachingMethod } from '@/features/curriculum';
 import type { AffectSignal } from '@/features/affect';
 import { useSessionStore } from '@/stores/session-store';
+import { useAffectAuditStore } from '@/stores/affect-audit-store';
 import { METHOD_FALLBACK, pickAvailableFallback } from './method-fallbacks';
 import type { BehaviorSignal as EngagementBehaviorSignal } from './types';
 
@@ -17,6 +18,17 @@ const DISTRACTION_CONFIDENCE_THRESHOLD = 0.6;
 const DISTRACTION_STREAK_THRESHOLD = 3;
 const CONSECUTIVE_WRONG_THRESHOLD = 3;
 const STUCK_ON_ITEM_MS = 90_000;
+
+/**
+ * Exported so the audit log reports runs against exactly the bar that
+ * gates a real switch — if these are ever tuned, the log follows rather
+ * than quietly disagreeing with the controller.
+ */
+export const ADAPTIVE_THRESHOLDS = {
+  distractionConfidence: DISTRACTION_CONFIDENCE_THRESHOLD,
+  distractionStreak: DISTRACTION_STREAK_THRESHOLD,
+  frustrationConfidence: FRUSTRATION_CONFIDENCE_THRESHOLD,
+} as const;
 
 function isQualifyingDistraction(signal: AffectSignal | undefined): boolean {
   return !!signal && signal.label === 'distracted' && signal.confidence >= DISTRACTION_CONFIDENCE_THRESHOLD;
@@ -68,24 +80,28 @@ export function evaluateAdaptiveSwitch(
     return { shouldQueueSwitch: false };
   }
 
+  // Built before the no-fallback early return so the "we needed content"
+  // path carries the same explanation as a real switch — that reason is
+  // the whole value of the entry in the audit log.
+  const reasonParts: string[] = [];
+  if (highFrustration) reasonParts.push(`${latestAffect!.label} detected on camera`);
+  if (consistentlyDistracted) reasonParts.push(`consistent distraction detected on camera (${distractionStreak} reads in a row)`);
+  if (strugglingBehaviorally) reasonParts.push(`${behavior.consecutiveWrong} wrong answers in a row`);
+  const reason = reasonParts.join(' and ');
+
   const toMethod = pickAvailableFallback(currentMethod, availableMethods);
   if (!toMethod) {
     // Nothing else authored on this node to switch to — don't queue a
     // switch the player can't apply. (Frustration/distraction still got
     // logged by the caller either way.) Report the top-ranked fallback so
     // the caller can go generate it instead of just giving up.
-    return { shouldQueueSwitch: false, neededMethod: METHOD_FALLBACK[currentMethod][0] };
+    return { shouldQueueSwitch: false, neededMethod: METHOD_FALLBACK[currentMethod][0], reason };
   }
-
-  const reasonParts: string[] = [];
-  if (highFrustration) reasonParts.push(`${latestAffect!.label} detected on camera`);
-  if (consistentlyDistracted) reasonParts.push(`consistent distraction detected on camera (${distractionStreak} reads in a row)`);
-  if (strugglingBehaviorally) reasonParts.push(`${behavior.consecutiveWrong} wrong answers in a row`);
 
   return {
     shouldQueueSwitch: true,
     toMethod,
-    reason: reasonParts.join(' and '),
+    reason,
     // Only lead with a regulation beat when frustration ran high, per the locked affect rule.
     alsoRegulation: highFrustration,
   };
@@ -100,9 +116,13 @@ interface UseAdaptiveControllerArgs {
   /**
    * Called when a switch was warranted but no block for any fallback
    * method exists yet, so the node player can generate one on the fly
-   * (e.g. via Gemini) and add it to `availableMethods`. Only called again
-   * for the same method once a prior call for it has finished — not on
-   * every tick while one is in flight.
+   * (e.g. via Gemini) and add it to `availableMethods`.
+   *
+   * Fires at most **once per method per node**. That cap is load-bearing:
+   * generation is not guaranteed to actually yield the requested method
+   * (the offline fallback in `generateLessonBlocks` reshuffles the node's
+   * existing blocks, so `availableMethods` can come back unchanged), and
+   * without the cap this would re-request forever.
    */
   onNeedFallbackContent?: (method: TeachingMethod) => void;
   childId: string;
@@ -131,16 +151,16 @@ export function useAdaptiveController({
 }: UseAdaptiveControllerArgs) {
   const queueMethodChange = useSessionStore((s) => s.queueMethodChange);
   const logEvent = useSessionStore((s) => s.logEvent);
+  const recordAudit = useAffectAuditStore((s) => s.record);
   const hasPending = useSessionStore((s) => s.pendingMethodChange !== null);
   const alreadyQueuedRef = useRef(false);
   const distractionStreakRef = useRef(0);
   const lastAffectAtRef = useRef<number | undefined>(undefined);
   const wasPendingRef = useRef(hasPending);
-  // Methods currently being generated — prevents asking again every tick
-  // while one request is in flight, but (unlike alreadyQueuedRef) isn't
-  // permanent: if generation finishes without producing a usable block,
-  // the method is removed and a later tick can ask again.
-  const pendingFallbackRequestsRef = useRef<Set<TeachingMethod>>(new Set());
+  // Methods already requested on this node. Entries are never removed
+  // until the node changes — see `onNeedFallbackContent` for why retrying
+  // would spin forever rather than eventually succeed.
+  const requestedFallbacksRef = useRef<Set<TeachingMethod>>(new Set());
   const onNeedFallbackContentRef = useRef(onNeedFallbackContent);
   // `.at` of the last affect sample already "spent" triggering a switch.
   // Without this, re-arming after a switch applies would let the exact
@@ -160,7 +180,7 @@ export function useAdaptiveController({
     distractionStreakRef.current = 0;
     lastAffectAtRef.current = undefined;
     consumedAffectAtRef.current = 0;
-    pendingFallbackRequestsRef.current.clear();
+    requestedFallbacksRef.current.clear();
   }, [nodeId]);
 
   useEffect(() => {
@@ -194,11 +214,22 @@ export function useAdaptiveController({
 
     if (!evaluation.shouldQueueSwitch || !evaluation.toMethod) {
       // A switch was wanted but nothing on this node can serve it yet —
-      // ask the caller to generate that method's content, unless a
-      // request for it is already in flight.
+      // ask the caller to generate that method's content, at most once
+      // per method per node.
       const needed = evaluation.neededMethod;
-      if (needed && !pendingFallbackRequestsRef.current.has(needed)) {
-        pendingFallbackRequestsRef.current.add(needed);
+      if (needed && !requestedFallbacksRef.current.has(needed)) {
+        requestedFallbacksRef.current.add(needed);
+        recordAudit({
+          kind: 'decision',
+          childId,
+          subject,
+          nodeId,
+          decision: 'content_needed',
+          fromMethod: currentMethod,
+          toMethod: needed,
+          reason: evaluation.reason ?? '',
+          distractionStreak: distractionStreakRef.current,
+        });
         onNeedFallbackContentRef.current?.(needed);
       }
       return;
@@ -206,6 +237,17 @@ export function useAdaptiveController({
 
     alreadyQueuedRef.current = true;
     queueMethodChange({ fromMethod: currentMethod, toMethod: evaluation.toMethod, reason: evaluation.reason ?? '' }, evaluation.alsoRegulation);
+    recordAudit({
+      kind: 'decision',
+      childId,
+      subject,
+      nodeId,
+      decision: 'switch_queued',
+      fromMethod: currentMethod,
+      toMethod: evaluation.toMethod,
+      reason: evaluation.reason ?? '',
+      distractionStreak: distractionStreakRef.current,
+    });
     logEvent({
       childId,
       grade,
@@ -214,12 +256,5 @@ export function useAdaptiveController({
       type: 'method_switch_queued',
       detail: { fromMethod: currentMethod, toMethod: evaluation.toMethod, reason: evaluation.reason },
     });
-  }, [behavior, latestAffect, currentMethod, availableMethods, hasPending, queueMethodChange, logEvent, childId, grade, subject, nodeId]);
-
-  return {
-    /** Call once a generation request for `method` has settled (success or failure) so a later tick can ask again if still needed. */
-    notifyFallbackRequestSettled: (method: TeachingMethod) => {
-      pendingFallbackRequestsRef.current.delete(method);
-    },
-  };
+  }, [behavior, latestAffect, currentMethod, availableMethods, hasPending, queueMethodChange, logEvent, recordAudit, childId, grade, subject, nodeId]);
 }

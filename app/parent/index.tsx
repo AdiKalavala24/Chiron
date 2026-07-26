@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MessageCircleHeart, Sparkles, UserRound } from 'lucide-react-native';
+import { ArrowLeft, Eye, MessageCircleHeart, Sparkles, UserRound } from 'lucide-react-native';
 import { useTheme } from '@/theme';
 import { CandyButton, IconBadge, PillChip, StickerCard } from '@/components/ui';
 import { summarizeStats } from '@/features/parent';
@@ -30,11 +30,16 @@ export default function ParentAnalyticsScreen() {
             <CandyButton label="Narrative debrief" onPress={() => router.push('/parent/debrief')} accentColor={theme.colors.secondary} showArrow={false} />
           </View>
         </View>
-        <View style={{ flexDirection: 'row' }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[3] }}>
           <PillChip
             label="Guidance recs"
             icon={<Sparkles size={14} color={theme.colors.foreground} strokeWidth={2.5} />}
             onPress={() => router.push('/parent/guidance')}
+          />
+          <PillChip
+            label="Attention log"
+            icon={<Eye size={14} color={theme.colors.foreground} strokeWidth={2.5} />}
+            onPress={() => router.push('/parent/affect-audit')}
           />
         </View>
 
