@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Baby, Sparkle, Star, Trophy, Rocket as RocketIcon } from 'lucide-react-native';
+import { ArrowLeft, Baby, Sparkle, Star, Trophy, Rocket as RocketIcon } from 'lucide-react-native';
 import { useTheme } from '@/theme';
 import { CandyButton, IconBadge, StickerCard } from '@/components/ui';
 import { GRADE_BANDS, type GradeBand } from '@/features/curriculum';
@@ -33,6 +33,11 @@ export default function GradeSelectorScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <View style={{ paddingHorizontal: theme.space[5], paddingTop: theme.space[3] }}>
+        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back">
+          <IconBadge size={44} backgroundColor={theme.colors.card} icon={<ArrowLeft size={20} color={theme.colors.foreground} strokeWidth={2.5} />} />
+        </Pressable>
+      </View>
       <ScrollView contentContainerStyle={{ padding: theme.space[6], paddingBottom: theme.space[10] }}>
         <Text style={{ fontFamily: theme.fontFamily.headingExtraBold, fontSize: theme.fontSize['3xl'], color: theme.colors.foreground, marginBottom: theme.space[6] }}>
           What grade are you in?
